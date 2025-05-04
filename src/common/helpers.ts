@@ -1,25 +1,17 @@
 /* eslint-disable prefer-const */
-import { log, BigInt, BigDecimal, Address } from '@graphprotocol/graph-ts'
-import { ERC20 } from '../types/Factory/ERC20'
-import { ERC20SymbolBytes } from '../types/Factory/ERC20SymbolBytes'
-import { ERC20NameBytes } from '../types/Factory/ERC20NameBytes'
-import { User, LiquidityPosition } from '../types/schema'
-import { Factory as FactoryContract } from '../types/templates/Pair/Factory'
+import { Address, BigDecimal, BigInt } from '@graphprotocol/graph-ts'
 
-export const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000'
-export const FACTORY_ADDRESS = '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f'
-
-export let ZERO_BI = BigInt.fromI32(0)
-export let ONE_BI = BigInt.fromI32(1)
-export let ZERO_BD = BigDecimal.fromString('0')
-export let ONE_BD = BigDecimal.fromString('1')
-export let BI_18 = BigInt.fromI32(18)
-
-export let factoryContract = FactoryContract.bind(Address.fromString(FACTORY_ADDRESS))
+import { ERC20 } from '../../generated/Factory/ERC20'
+import { ERC20NameBytes } from '../../generated/Factory/ERC20NameBytes'
+import { ERC20SymbolBytes } from '../../generated/Factory/ERC20SymbolBytes'
+import { User } from '../../generated/schema'
+import { SKIP_TOTAL_SUPPLY, TokenDefinition } from './chain'
+import { ONE_BI, ZERO_BD, ZERO_BI } from './constants'
+import { getStaticDefinition } from './tokenDefinition'
 
 export function exponentToBigDecimal(decimals: BigInt): BigDecimal {
   let bd = BigDecimal.fromString('1')
-  for (let i = ZERO_BI; i.lt(decimals as BigInt); i = i.plus(ONE_BI)) {
+  for (let i = ZERO_BI; i.lt(decimals); i = i.plus(ONE_BI)) {
     bd = bd.times(BigDecimal.fromString('10'))
   }
   return bd
@@ -30,7 +22,7 @@ export function bigDecimalExp18(): BigDecimal {
 }
 
 export function convertEthToDecimal(eth: BigInt): BigDecimal {
-  return eth.toBigDecimal().div(exponentToBigDecimal(18))
+  return eth.toBigDecimal().div(exponentToBigDecimal(BigInt.fromI32(18)))
 }
 
 export function convertTokenToDecimal(tokenAmount: BigInt, exchangeDecimals: BigInt): BigDecimal {
@@ -41,8 +33,8 @@ export function convertTokenToDecimal(tokenAmount: BigInt, exchangeDecimals: Big
 }
 
 export function equalToZero(value: BigDecimal): boolean {
-  const formattedVal = parseFloat(value.toString())
-  const zero = parseFloat(ZERO_BD.toString())
+  const formattedVal = value.toString()
+  const zero = ZERO_BD.toString()
   if (zero == formattedVal) {
     return true
   }
@@ -54,9 +46,10 @@ export function isNullEthValue(value: string): boolean {
 }
 
 export function fetchTokenSymbol(tokenAddress: Address): string {
-  // hard coded override
-  if (tokenAddress.toHexString() == '0xe0b7927c4af23765cb51314a0e0521a9645f0e2a') {
-    return 'DGD'
+  // static definitions overrides
+  let staticDefinition = getStaticDefinition(tokenAddress)
+  if (staticDefinition != null) {
+    return (staticDefinition as TokenDefinition).symbol
   }
 
   let contract = ERC20.bind(tokenAddress)
@@ -81,9 +74,10 @@ export function fetchTokenSymbol(tokenAddress: Address): string {
 }
 
 export function fetchTokenName(tokenAddress: Address): string {
-  // hard coded override
-  if (tokenAddress.toHexString() == '0xe0b7927c4af23765cb51314a0e0521a9645f0e2a') {
-    return 'DGD'
+  // static definitions overrides
+  let staticDefinition = getStaticDefinition(tokenAddress)
+  if (staticDefinition != null) {
+    return (staticDefinition as TokenDefinition).name
   }
 
   let contract = ERC20.bind(tokenAddress)
@@ -108,48 +102,40 @@ export function fetchTokenName(tokenAddress: Address): string {
 }
 
 export function fetchTokenTotalSupply(tokenAddress: Address): BigInt {
+  if (SKIP_TOTAL_SUPPLY.includes(tokenAddress.toHexString())) {
+    return BigInt.fromI32(0)
+  }
+
   let contract = ERC20.bind(tokenAddress)
-  let totalSupplyValue = null
+  let totalSupplyValue = BigInt.fromI32(0)
   let totalSupplyResult = contract.try_totalSupply()
   if (!totalSupplyResult.reverted) {
-    totalSupplyValue = totalSupplyResult as i32
+    totalSupplyValue = totalSupplyResult.value
   }
-  return BigInt.fromI32(totalSupplyValue as i32)
+  return totalSupplyValue
 }
 
 export function fetchTokenDecimals(tokenAddress: Address): BigInt {
+  // static definitions overrides
+  let staticDefinition = getStaticDefinition(tokenAddress)
+  if (staticDefinition != null) {
+    return (staticDefinition as TokenDefinition).decimals
+  }
+
   let contract = ERC20.bind(tokenAddress)
   // try types uint8 for decimals
-  let decimalValue = null
+  let decimalValue = 0
   let decimalResult = contract.try_decimals()
   if (!decimalResult.reverted) {
     decimalValue = decimalResult.value
   }
-  return BigInt.fromI32(decimalValue as i32)
-}
-
-export function createLiquidityPosition(exchange: Address, user: Address): LiquidityPosition {
-  let id = exchange
-    .toHexString()
-    .concat('-')
-    .concat(user.toHexString())
-  let liquidityTokenBalance = LiquidityPosition.load(id)
-  if (liquidityTokenBalance === null) {
-    liquidityTokenBalance = new LiquidityPosition(id)
-    liquidityTokenBalance.liquidityTokenBalance = ZERO_BD
-    liquidityTokenBalance.pair = exchange.toHexString()
-    liquidityTokenBalance.user = user.toHexString()
-    liquidityTokenBalance.save()
-  }
-  if (liquidityTokenBalance == null) log.error('LiquidityTokenBalance is null', [id])
-  return liquidityTokenBalance as LiquidityPosition
+  return BigInt.fromI32(decimalValue)
 }
 
 export function createUser(address: Address): void {
   let user = User.load(address.toHexString())
-  if (user === null) {
+  if (!user) {
     user = new User(address.toHexString())
-    user.usdSwapped = ZERO_BD
     user.save()
   }
 }
